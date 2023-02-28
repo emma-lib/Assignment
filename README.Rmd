@@ -1,0 +1,380 @@
+---
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, echo = TRUE)
+```
+
+title: "Problem Set 2: Bias, Variance, Cross-Validation" author: "51709"
+date: \| \| `r format(Sys.time(), '%d %B %Y')` output: pdf_document
+
+### 1a. With predictor `x` and outcome `noisy_y`, split the data into a training and test set
+
+```{r}
+library(boot)
+set.seed(1)
+x <- seq(from=0, to=20, by=0.05)
+y <- 500 + 0.4 * (x-10)^3
+noise <- rnorm(length(x), mean=10, sd=80)
+noisy.y <- y + noise
+{
+plot(x,noisy.y)
+lines(x, y, col='red')
+}
+```
+
+Assign the data to a dataframe. Randomly sample the data, assigning 80%
+to training set and 20% to test set.
+
+```{r}
+df <- data.frame(x, noisy.y)
+N <- floor(.8*nrow(df))
+train_idx <- sample(1:nrow(df), N)
+df_train <- df[train_idx,]
+df_test <- df[-train_idx,]
+```
+
+### 1b. Perform 10-fold CV for polynomials from degree 1 to 5 (use MSE as your error measure). This should be done from scratch using a for loop.
+
+Randomly permute the training set and split into 10 evenly sized folds.
+Then create a for loop: for every polynomial model of degree 1 through
+5, split the training set again into a training set and test set, with 1
+fold in the test set and the rest in the training set. Change which fold
+is in the test set each time by inserting a nested for loop for i (fold
+used for test) 1 through 10 (for 10-fold cross-validation).
+
+Calculate the mean-squared error of the test sub-set (validation set)
+for each fold. Store results from each loop in a results table with
+column headings for the degree of the model, the fold number and the
+mean-squared error.
+
+```{r}
+folds <- sample(rep(1:10, each = nrow(df_train)/10), replace=TRUE)
+degree <- 1:5
+results <- data.frame(results_degree=numeric(0), results_i=numeric(0), results_error=numeric(0))
+for (d in degree){
+  for (i in 1:10){
+    cv.te <- df_train[folds==i,]
+    cv.tr <- df_train[folds!=i,]
+    cv.tr.x <- cv.tr[,1]
+    cv.tr.y <- cv.tr[,2]
+    cv.te.x <- cv.te[,1]
+    cv.te.y <- cv.te[,2]
+    mod <- glm(noisy.y ~ poly(x, d, raw = T), data=df_train)
+    row <- data.frame(results_degree=d, results_i=i,     results_error=mean((predict(mod, cv.te) - cv.te$noisy.y)^2))
+    results <- rbind(results, row)
+    }
+}
+results
+```
+
+To calculate the overall cross-validation error for each model, create a
+table which summarises the cross-validation error for each fold. For
+each degree 1 through 5, calculate the sum of the MSE's across the 10
+folds (`a`) using an ifelse condition, and calculate the number of folds
+(`b`). Then divide `a` by `b` to give the average MSE for each of the 5
+models being tested.
+
+```{r}
+  summary_table <- data.frame(summary_degree=numeric(0), sum_error =numeric(0), count_error=numeric(0), mean_error=numeric(0))
+  
+  a <- 0
+  b <- 0
+  c <- 0
+
+  for (k in 1:5){
+    for (j in 1:nrow(results)){
+      ifelse(results[j,1] == k, a <- a + results[j,3], a <- a)
+      ifelse(results[j,1] == k, b <- b + 1, b <- b)
+    }
+    c = a / b
+    row <- data.frame(summary_degree = k, sum_error = a, count_error = b, mean_error = c)
+    summary_table <- rbind(summary_table, row)
+    a = 0
+    b = 0
+    c = 0
+  }
+summary_table
+```
+
+### 1c. Plot the best model's fitted line in blue and compare to the true function (the red line from the previous plot).
+
+From the table above, the model with the lowest MSE (and therefore the
+best model) is the degree 5 polynomial.
+
+```{r}
+plot(x,noisy.y)
+lines(x, y, col='red')
+poly5_mod <-lm(noisy.y ~ poly(x, 5, raw = T), data = df_train)
+x <- seq(min(df$x), max(df$x), length.out=20)
+y <- predict(poly5_mod, newdata = data.frame(x = x))
+lines(x, y, col = "blue")
+```
+
+### 1.d Comment on the results of (c). Why was performance better or worse at different order polynomials?
+
+Since we generated the data, we know that the true underlying function
+is a cubic function (with noise added). My 10-fold cross-validation
+shows that the degree 5 polynomial has the lowest cross-validation error
+(though this error value is very similar to the polynomials of degrees 3
+and 4). We can see from this plot that the 5 degree polynomial model is
+still visually a good fit to the data points, and stays fairly close to
+the true function.
+
+We can hazard that the reason a degree 5 model has slightly lower error
+than degree 3 model may be due to the noise we added to the true
+function, therefore the 4 and 5 degree models are over-fitting to the
+noise as the higher the degree of polynomial, the more flexible it is.
+Cross-validation is only an approximation of the test error so it is
+possible for over-fitting to occur, however this is more common when the
+sample size is small.
+
+### 1e. Report the CV error and test error at each order of polynomial. Which achieves the lowest CV error? How does the CV error compare to the test error? Comment on the results.
+
+```{r}
+degree <- 1:5
+test_results <- data.frame(degree=numeric(0), test_error=numeric(0))
+for (d in degree){
+    mod <- glm(noisy.y ~ poly(x, d, raw = T), data=df_test)
+    test_row <- data.frame(degree=d,     test_error = mean((predict(mod, df_test) - df_test$noisy.y)^2))
+    test_results <- rbind(test_results, test_row)
+    }
+test_results <- cbind(test_results, summary_table[,4, drop=FALSE])
+names(test_results)[names(test_results) == "mean_error"] <- "cross-validation_error" 
+test_results
+```
+
+For test error, the error decreases as the degree of the polynomial
+increases (from 1 through to 5). For cross-validation error, the error
+decreases to degree 3, increases very slightly to degree 4, and
+decreases again to degree 5.
+
+The lowest cross-validation error and test error are both for the
+polynomial of degree 5.
+
+While test error is higher than validation error for degrees 1 and 2, it
+is lower for degrees 3, 4 and 5. It may be that the test set contains
+more "easy" y's to predict based on x's than in the validation set, so
+the model performs better at degrees 3, 4 and 5 on test error, compared
+to degrees 1 and 2. However, my randomisation of the dataset into a
+training and test split was intended to try to mitigate this issue.
+
+### 2a. Pick a new dataset from the `mlbench` package (one we haven't used in class that is 2-dimensional with two classes). Experiment with classifying the data using KNN at different values of k. Use cross-validation to choose your best model.
+
+```{r}
+library(mlbench)
+library(dplyr)
+set.seed(1)
+ls(package:mlbench)
+c <- mlbench.circle(1000,2)
+plot(c)
+```
+
+Move the dataset into a dataframe so it's easier to work with. Rename
+variables and set levels of classes.
+
+```{R}
+cdf <- data.frame(c)
+cdf <- cdf %>% rename(Y.1 = classes, X.1 = x.1, X.2 = x.2)
+levels(cdf$Y.1) <- c("0", "1")
+```
+
+Randomly permute the training set and split into 10 evenly sized folds.
+Then create a for loop: for values 1 through 100 of K, split the
+training set again into a training set and test set, with 1 fold in the
+test set and the rest in the training set. Change which fold is in the
+test set each time by inserting a nested for loop for i (fold used for
+test) 1 through 10 (for 10-fold cross-validation). Calculate the
+mean-squared error of the test sub-set (validation sub-set) for each
+fold. Store results from each loop in a results table with column
+headings for the value of the k parameter, the fold number and the
+classification error.
+
+```{R}
+library(class)
+n_test <- floor(nrow(cdf)*0.2)
+idx <- sample(1:nrow(cdf), n_test)
+train <- cdf[-idx,]
+test <- cdf[idx,]
+folds <- sample(rep(1:10, each = nrow(train)/10), replace=FALSE)
+results <- data.frame(results_k=numeric(0), results_i=numeric(0), results_error=numeric(0))
+range <- 1:100
+for (k in range){
+  for (i in 1:10){
+  cv.te <- train[folds==i,]
+  cv.tr <- train[folds!=i,]
+  cv.tr.x <- cv.tr[,1:2]
+  cv.tr.y <- cv.tr[,3]
+  cv.te.x <- cv.te[,1:2]
+  cv.te.y <- cv.te[,3]
+  pred.Y <- knn(cv.tr.x, cv.te.x, cv.tr.y, k)
+  row <- data.frame(results_k=k, results_i=i, results_error=mean(cv.te.y != pred.Y))
+  results <- rbind(results, row)
+  }
+}
+results
+```
+
+```{r}
+  summary_table_k <- data.frame(sum_k=numeric(0), sum_error =numeric(0), count_error=numeric(0), mean_error=numeric(0))
+  
+  a <- 0
+  b <- 0
+  c <- 0
+
+  for (k in range){
+    for (j in 1:nrow(results)){
+      ifelse(results[j,1] == k, a <- a + results[j,3], a <- a)
+      ifelse(results[j,1] == k, b <- b + 1, b <- b)
+    }
+    c = a / b
+    row <- data.frame(sum_k = k, sum_error = a, count_error = b, mean_error = c)
+    summary_table_k <- rbind(summary_table_k, row)
+    a = 0
+    b = 0
+    c = 0
+  }
+summary_table_k
+```
+
+remove k = 1 as this is unhelpful. Then find the minimum error.
+
+```{r}
+summary_table_k_min <- summary_table_k[-1,]
+which(summary_table_k_min == min(summary_table_k_min[,4]), arr.ind=TRUE)
+```
+
+Ignoring k=1, minimum cross-validation error is where k = 15. So our
+best model is KNN where k = 15.
+
+### 2b. Plot misclassification error rate at different values of k.
+
+```{r}
+library(ggplot2)
+ggplot(summary_table_k, aes(x = sum_k)) +
+geom_line(aes(y = mean_error), color = "green") + labs(x = "k in knn", y = "misclassification error rate", title = "Misclassification Error Rate at Different Values of K") + theme_bw()
+```
+
+### 2c. Plot the decision boundary for your classifier using the function at the top code block, `plot_decision_boundary()`. Make sure you load this function into memory before trying to use it.
+
+Take minimum of X1 and maximum of X1, then discretise, go from min to
+max in steps of 0.05. Do the same for second feature, X2. Now have a
+table of (3/0.05 = 60) 60 rows and 60 columns and these are the feature
+ranges discretised in small steps. Then go through every cell and
+predict what it would have predicted (e.g. predict blue all the time),
+dots over the top of the blue/green indicate the true values (class 0 or
+1) of the data points in the test set. From 2a, the best model is where
+k = 15.
+
+```{R}
+library(ggplot2)
+plot_decision_boundary <- function(tr.x, tr.y, pred_grid, grid)
+{
+cl <- ifelse(tr.Y == 1, "1", "0")
+dataf <- data.frame(grid, prob = as.numeric(pred_grid), class = ifelse(pred_grid==2, "1", "0"))
+col <- c("#009E73", "#0072B2")
+plot <- ggplot(dataf) + geom_raster(aes(x=X.1, y=X.2, fill=prob), alpha=.9, data=dataf) +
+geom_point(aes(x=X.1, y=X.2, color=class), size=1,
+data=data.frame(X.1=tr.X[,1], X.2=tr.X[,2], class=cl)) +
+geom_point(aes(x=X.1, y=X.2), size=1, shape=1,
+data=data.frame(X.1=tr.X[,1], X.2=tr.X[,2], class=cl)) + 
+scale_colour_manual(values=col, name="Class") +
+scale_fill_gradientn(colors=col[c(1,2)], limits=c(0,1), guide = FALSE) + xlab("Feature 1") + ylab("Feature 2")
+return(plot)
+}
+```
+
+```{r}
+tr.X <- train[,1:2]
+tr.Y <- train[,3]
+te.X <- test[,1:2]
+te.Y <- test[,3]
+grid <- expand.grid(X.1=seq(min(tr.X[,1]-0.5), max(tr.X[,1]+0.5), by=0.05), X.2=seq(min(tr.X[,2]-0.5), max(tr.X[,2]+0.5), by=0.05))
+y_pred15 <- knn(tr.X, te.X, tr.Y, k =15, prob = TRUE)
+pred_grid <- as.numeric(knn(tr.X, grid, tr.Y, k=15, prob=TRUE)) - 1
+plot_decision_boundary(tr.X, tr.Y, pred_grid, grid)
+```
+
+Take minimum of X1 and maximum of X1, then discretise, go from min to
+max in steps of 0.05. Do the same for second feature, X2. Now have a
+table of (3/0.05 = 60) 60 rows and 60 columns and these are the feature
+ranges discretised in small steps. Then go through every cell and
+predict what it would have predicted (e.g. predict blue all the time),
+dots over the top of the blue/green indicate the true values (class 0 or
+1) of the data points in the test set. From 2a, the best model is where
+k = 15.
+
+```{r}
+library(ggplot2)
+plot_decision_boundary <- function(tr.x, tr.y, pred_grid, grid)
+{
+cl <- ifelse(tr.Y == 1, "1", "0")
+dataf <- data.frame(grid, prob = as.numeric(pred_grid), class = ifelse(pred_grid==2, "1", "0"))
+col <- c("#009E73", "#0072B2")
+plot <- ggplot(dataf) + geom_raster(aes(x=X.1, y=X.2, fill=prob), alpha=.9, data=dataf) +
+geom_point(aes(x=X.1, y=X.2, color=class), size=1,
+data=data.frame(X.1=tr.X[,1], X.2=tr.X[,2], class=cl)) +
+geom_point(aes(x=X.1, y=X.2), size=1, shape=1,
+data=data.frame(X.1=tr.X[,1], X.2=tr.X[,2], class=cl)) + 
+scale_colour_manual(values=col, name="Class") +
+scale_fill_gradientn(colors=col[c(1,2)], limits=c(0,1), guide = FALSE) + xlab("Feature 1") + ylab("Feature 2")
+return(plot)
+}
+
+tr.X <- train[,1:2]
+tr.Y <- train[,3]
+te.X <- test[,1:2]
+te.Y <- test[,3]
+grid <- expand.grid(X.1=seq(min(tr.X[,1]-0.5), max(tr.X[,1]+0.5), by=0.05), X.2=seq(min(tr.X[,2]-0.5), max(tr.X[,2]+0.5), by=0.05))
+y_pred15 <- knn(tr.X, te.X, tr.Y, k =15, prob = TRUE)
+pred_grid <- as.numeric(knn(tr.X, grid, tr.Y, k=15, prob=TRUE)) - 1
+plot_decision_boundary(tr.X, tr.Y, pred_grid, grid)
+```
+
+### 3. Performance measures for classification
+
+**Recall the `Caravan` data from the week 2 lab (part of the `ISLR`
+package). Train a KNN model with k=2 using all the predictors in the
+dataset and the outcome `Purchase`. Create a confusion matrix with the
+test set predictions and the actual values of `Purchase`. Using the
+values of the confusion matrix, calculate precision, recall, and F1.
+(Note that `Yes` is the positive class and the confusion matrix may be
+differently oriented than the one presented in class.)**
+
+```{r}
+library(ISLR)
+names(Caravan)
+X <- Caravan[,1:85]
+Y <- Caravan[,86]
+X <- scale(X)
+n_test <- floor(nrow(Caravan) * 0.2)
+idx <- sample(1:nrow(Caravan), n_test)
+tr.X <- X[-idx,]
+te.X <- X[idx,]
+tr.Y <- Y[-idx]
+te.Y <- Y[idx]
+set.seed(1)
+pred.Y <- knn(tr.X, te.X, tr.Y, k = 2)
+matrix <- table(te.Y, pred.Y)
+matrix
+
+TP <- matrix['Yes', 'Yes']
+FP <- matrix['No', 'Yes']
+TN <- matrix['No', 'No']
+FN <- matrix['Yes', 'No']
+Precision = TP/ (TP + FP)
+Precision
+```
+
+```{r}
+Recall = TP/ (TP + FN)
+Recall
+```
+
+```{r}
+F1 = 2*((Precision*Recall)/(Precision+Recall))
+F1
+```
